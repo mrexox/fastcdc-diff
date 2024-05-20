@@ -8,11 +8,13 @@ crate-type = ["cdylib"]
 
 [dependencies]
 arrayref = "0.3.7"
+fast_rsync = "0.2.0"
 fastcdc = { version = "3.1.0" }
 # Default enable napi4 feature, see https://nodejs.org/api/n-api.html#node-api-version-matrix
 napi = { version = "2.12.2", default-features = false, features = ["napi4"] }
 napi-derive = "2.12.2"
 rand = "0.8.5"
+similar = "2.5.0"
 
 [build-dependencies]
 napi-build = "2.0.1"
