@@ -1,8 +1,9 @@
 #![deny(clippy::all)]
 
 use napi::bindgen_prelude::*;
+use std::fmt;
 use std::fs::{self, File};
-use std::io::{Read, Write};
+use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::Path;
 
 use similar::utils::diff_slices;
@@ -24,7 +25,7 @@ struct Signature {
 
 #[derive(Debug, Hash, Clone)]
 struct Chunk {
-  hash: u64,
+  hash: [u8; 32],
   offset: u64,
   length: usize,
 }
@@ -51,19 +52,36 @@ impl Ord for Chunk {
 
 impl Signature {
   /// Calculates a signature based on FastCDC algorithm on a raw data.
-  fn new<R: Read>(source: R) -> Result<Self> {
-    let chunker = StreamCDC::new(source, 4096, 16384, 65535);
-
+  fn new<R: Read + Seek>(mut source: R) -> Result<Self> {
+    use std::time::Instant;
+    let chunker = StreamCDC::new(&mut source, 4096, 16384, 65535);
     let mut chunks: Vec<Chunk> = Vec::new();
 
+    let now = Instant::now();
     for result in chunker {
       let chunk = result.unwrap();
+
       chunks.push(Chunk {
-        hash: chunk.hash,
+        hash: [0; 32],
         offset: chunk.offset,
         length: chunk.length,
       });
     }
+    let elapsed = now.elapsed();
+    println!("FastCDC completed: {:.2?}", elapsed);
+
+    let now = Instant::now();
+
+    chunks.iter_mut().for_each(|chunk| {
+      source.seek(SeekFrom::Start(chunk.offset)).unwrap();
+      let mut buf: Vec<u8> = vec![0; chunk.length];
+      source.read_exact(&mut buf).unwrap();
+      let hash = blake3::hash(&buf);
+      chunk.hash = hash.into();
+    });
+
+    let elapsed = now.elapsed();
+    println!("Blake2 calculated: {:.2?}", elapsed);
 
     Ok(Self {
       version: VERSION,
@@ -79,12 +97,12 @@ impl Signature {
     let mut chunks = Vec::with_capacity(numchunks);
     for _i in 0..numchunks {
       chunks.push(Chunk {
-        hash: u64::from_be_bytes(*array_ref![vec, offset, 8]),
-        offset: u64::from_be_bytes(*array_ref![vec, offset + 8, 8]),
-        length: usize::from_be_bytes(*array_ref![vec, offset + 16, 8]),
+        hash: array_ref![vec, offset, 32].clone(),
+        offset: u64::from_be_bytes(*array_ref![vec, offset + 32, 8]),
+        length: usize::from_be_bytes(*array_ref![vec, offset + 40, 8]),
       });
 
-      offset += 24;
+      offset += 48;
     }
 
     Ok(Self { version, chunks })
@@ -95,13 +113,23 @@ impl Signature {
     dest.write_all(self.chunks.len().to_be_bytes().as_ref())?;
 
     for chunk in self.chunks.iter() {
-      dest.write_all(chunk.hash.to_be_bytes().as_ref())?;
+      dest.write_all(chunk.hash.as_ref())?;
       dest.write_all(chunk.offset.to_be_bytes().as_ref())?;
       dest.write_all(chunk.length.to_be_bytes().as_ref())?;
     }
 
     dest.flush()?;
 
+    Ok(())
+  }
+}
+
+impl fmt::Display for Signature {
+  fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    write!(f, "{} chunks: {}", self.version, self.chunks.len())?;
+    for chunk in self.chunks.iter() {
+      write!(f, "{} {} {}\n", chunk.hash[0], chunk.offset, chunk.length)?;
+    }
     Ok(())
   }
 }
@@ -113,10 +141,10 @@ pub fn signature_to_file(source: String, dest: String) -> Result<()> {
     return Err(Error::from_reason(format!("file {source} does not exist")));
   }
 
-  let source = File::open(source).unwrap();
+  let mut source = File::open(source).unwrap();
   let mut dest = File::create(dest).unwrap();
 
-  let signature = Signature::new(source).unwrap();
+  let signature = Signature::new(&mut source).unwrap();
   signature.write(&mut dest).unwrap();
 
   Ok(())
@@ -129,21 +157,23 @@ pub fn signature(source: String) -> Result<Buffer> {
     return Err(Error::from_reason(format!("file {source} does not exist")));
   }
 
-  let source = File::open(source).unwrap();
-  let signature = Signature::new(source).unwrap();
+  let mut source = File::open(source).unwrap();
+  let signature = Signature::new(&mut source).unwrap();
   let mut dest = Vec::new();
   signature.write(&mut dest).unwrap();
+
+  // println!("{}", signature);
 
   Ok(dest.into())
 }
 
 #[napi]
 pub fn diff(source: String, dest: String) -> Result<()> {
-  let source_file = File::open(source.clone()).unwrap();
-  let source_sig = Signature::new(source_file).unwrap();
+  let mut source_file = File::open(source.clone()).unwrap();
+  let source_sig = Signature::new(&mut source_file).unwrap();
 
-  let dest_file = File::open(dest).unwrap();
-  let dest_sig = Signature::new(dest_file).unwrap();
+  let mut dest_file = File::open(dest).unwrap();
+  let dest_sig = Signature::new(&mut dest_file).unwrap();
 
   // Measure diffing
   println!("source: {}", source_sig.chunks.len());
@@ -168,13 +198,29 @@ pub fn diff_sig(sig_source: String, dest: String) -> Result<()> {
   let sig_data = fs::read(sig_source).unwrap();
   let source_sig = Signature::from(&sig_data).unwrap();
 
-  let dest_file = File::open(dest).unwrap();
-  let dest_sig = Signature::new(dest_file).unwrap();
+  let mut dest_file = File::open(dest).unwrap();
+  let dest_sig = Signature::new(&mut dest_file).unwrap();
+
+  if source_sig.version != dest_sig.version {
+    return Err(Error::from_reason(format!(
+      "signature version mismatch: wants {}, found {}",
+      dest_sig.version, source_sig.version
+    )));
+  }
 
   let diff_res = diff_slices(Algorithm::Myers, &source_sig.chunks, &dest_sig.chunks);
+
   for action in diff_res.iter() {
     match action.0 {
-      ChangeTag::Delete => {}
+      ChangeTag::Delete => {
+        let first = &action.1[0];
+        let last = &action.1[action.1.len() - 1];
+        println!(
+          "- {} -> {}",
+          first.offset,
+          last.offset + (last.length as u64)
+        );
+      }
       ChangeTag::Insert => {
         let mut size: usize = 0;
         action.1.into_iter().for_each(|ch| size += ch.length);
@@ -196,14 +242,14 @@ pub fn diff_sig(sig_source: String, dest: String) -> Result<()> {
 
 #[test]
 fn test_signature_serialization() {
+  use std::io::Cursor;
   let data: Vec<u8> = (0..100500).map(|_| rand::random::<u8>()).collect();
-
-  let sig = Signature::new(&data[..]).unwrap();
+  let mut buffer = Cursor::new(&data[..]);
+  let sig = Signature::new(&mut buffer).unwrap();
   let mut serialized_data = Vec::new();
   sig.write(&mut serialized_data).unwrap();
 
   let sig_re = Signature::from(&serialized_data).unwrap();
-
   assert_eq!(sig, sig_re);
 }
 

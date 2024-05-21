@@ -8,6 +8,7 @@ crate-type = ["cdylib"]
 
 [dependencies]
 arrayref = "0.3.7"
+blake3 = "1.5.1"
 fast_rsync = "0.2.0"
 fastcdc = { version = "3.1.0" }
 # Default enable napi4 feature, see https://nodejs.org/api/n-api.html#node-api-version-matrix
