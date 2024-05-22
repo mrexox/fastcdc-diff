@@ -310,9 +310,10 @@ if (!nativeBinding) {
   throw new Error(`Failed to load native binding`)
 }
 
-const { signatureToFile, signature, diff, diffSig } = nativeBinding
+const { signatureToFile, signature, diff, apply, diffSig } = nativeBinding
 
 module.exports.signatureToFile = signatureToFile
 module.exports.signature = signature
 module.exports.diff = diff
+module.exports.apply = apply
 module.exports.diffSig = diffSig

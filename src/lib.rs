@@ -3,7 +3,7 @@
 use napi::bindgen_prelude::*;
 use std::fmt;
 use std::fs::{self, File};
-use std::io::{Read, Seek, SeekFrom, Write};
+use std::io::{copy, ErrorKind, Read, Seek, SeekFrom, Write};
 use std::path::Path;
 
 use similar::utils::diff_slices;
@@ -167,29 +167,155 @@ pub fn signature(source: String) -> Result<Buffer> {
   Ok(dest.into())
 }
 
+/// Generate simple diff format:
+///
+/// VERSION(u8) - a diff file version for compatibility checking
+/// OPERATION(u8) - 0/1, 0 means equal, 1 means insert
+/// DATA:
+///   for 0:
+///     START OFFSET(u64) - offset of the file A to copy from
+///     END OFFSET(u64) - offset of the file A to copy until
+///   for 1:
+///     SIZE(usize) - the number of bytes
+///     BYTES([u8]) - the raw binary data from file B to be insterted
 #[napi]
-pub fn diff(source: String, dest: String) -> Result<()> {
-  let mut source_file = File::open(source.clone()).unwrap();
-  let source_sig = Signature::new(&mut source_file).unwrap();
+pub fn diff(a: String, b: String, diff_path: String) -> Result<()> {
+  let mut a_file = File::open(a).unwrap();
+  let a_sig = Signature::new(&mut a_file).unwrap();
 
-  let mut dest_file = File::open(dest).unwrap();
-  let dest_sig = Signature::new(&mut dest_file).unwrap();
+  let mut b_file = File::open(b).unwrap();
+  let b_sig = Signature::new(&mut b_file).unwrap();
 
-  // Measure diffing
-  println!("source: {}", source_sig.chunks.len());
-  println!("dest: {}", dest_sig.chunks.len());
-  use std::time::Instant;
-  let now = Instant::now();
+  let res = diff_slices(Algorithm::Myers, &a_sig.chunks, &b_sig.chunks);
 
-  let res = diff_slices(Algorithm::Myers, &source_sig.chunks, &dest_sig.chunks);
+  let mut diff_file = File::create(diff_path).unwrap();
+  diff_file.write_all(&[VERSION]).unwrap();
 
-  let elapsed = now.elapsed();
-  println!("Myers, Elapsed: {:.2?}", elapsed);
-  dbg!(res.len());
   for action in res.iter() {
-    println!("{} ({})", action.0, action.1.len());
+    match action.0 {
+      ChangeTag::Delete => {}
+      ChangeTag::Insert => {
+        let start_chunk = &action.1[0];
+        let end_chunk = &action.1[action.1.len() - 1];
+        diff_file.write_all(&[1]).unwrap();
+        // let mut buf = vec![
+        //   0;
+        //   (end_chunk.offset + (end_chunk.length as u64) - start_chunk.offset)
+        //     .try_into()
+        //     .unwrap()
+        // ];
+
+        // b_file.read_exact(&mut buf).unwrap();
+        // diff_file
+        //   .write_all(buf.len().to_be_bytes().as_ref())
+        //   .unwrap();
+        // diff_file.write_all(&buf).unwrap();
+
+        b_file.seek(SeekFrom::Start(start_chunk.offset)).unwrap();
+        let size = end_chunk.offset + end_chunk.length as u64 - start_chunk.offset;
+        diff_file.write_all(size.to_be_bytes().as_ref()).unwrap();
+        let mut chunk = b_file.take(size);
+        copy(&mut chunk, &mut diff_file).unwrap();
+        b_file = chunk.into_inner();
+
+        println!(
+          "+ {} - {} ({})",
+          start_chunk.offset,
+          end_chunk.offset + end_chunk.length as u64,
+          size
+        );
+      }
+      ChangeTag::Equal => {
+        let start_chunk = &action.1[0];
+        let end_chunk = &action.1[action.1.len() - 1];
+
+        diff_file.write_all(&[0]).unwrap();
+        diff_file
+          .write_all(start_chunk.offset.to_be_bytes().as_ref())
+          .unwrap();
+        diff_file
+          .write_all(
+            (end_chunk.offset + end_chunk.length as u64)
+              .to_be_bytes()
+              .as_ref(),
+          )
+          .unwrap();
+
+        println!(
+          "= {} - {} ({})",
+          start_chunk.offset,
+          end_chunk.offset + end_chunk.length as u64,
+          end_chunk.offset + end_chunk.length as u64 - start_chunk.offset
+        );
+      }
+    }
   }
 
+  Ok(())
+}
+
+#[napi]
+pub fn apply(diff_path: String, a: String, result: String) -> Result<()> {
+  let mut diff_file = File::open(diff_path).unwrap();
+
+  let mut a_file = File::open(a).unwrap();
+  let mut res_file = File::create(result).unwrap();
+
+  let mut buf: [u8; 1] = [0; 1];
+
+  diff_file.read_exact(&mut buf).unwrap();
+  if buf[0] != VERSION {
+    return Err(Error::from_reason(format!(
+      "unsupported diff version: {}, wanted: {}",
+      buf[0], VERSION
+    )));
+  }
+
+  let mut u64buf: [u8; 8] = [0; 8];
+
+  loop {
+    if let Err(err) = diff_file.read_exact(&mut buf) {
+      if err.kind() == ErrorKind::UnexpectedEof {
+        break;
+      }
+
+      return Err(Error::from_reason(format!("unexpected error: {}", err)));
+    }
+
+    match buf[0] {
+      0 => {
+        diff_file.read_exact(&mut u64buf).unwrap();
+        let start = u64::from_be_bytes(u64buf);
+        diff_file.read_exact(&mut u64buf).unwrap();
+        let end = u64::from_be_bytes(u64buf);
+
+        a_file.seek(SeekFrom::Start(start)).unwrap();
+
+        let mut chunk = a_file.take(end - start);
+
+        // let mut data = vec![0; (end - start).try_into().unwrap()];
+        // a_file.read_exact(&mut data).unwrap();
+        // res_file.write_all(&data).unwrap();
+        copy(&mut chunk, &mut res_file).unwrap();
+
+        a_file = chunk.into_inner();
+      }
+      1 => {
+        diff_file.read_exact(&mut u64buf).unwrap();
+        let size = usize::from_be_bytes(u64buf);
+        // let mut data = vec![0; size];
+        // diff_file.read_exact(&mut data).unwrap();
+        // res_file.write_all(&data).unwrap();
+
+        let mut chunk = diff_file.take(size as u64);
+        copy(&mut chunk, &mut res_file).unwrap();
+        diff_file = chunk.into_inner();
+      }
+      _ => {
+        unimplemented!();
+      }
+    }
+  }
   Ok(())
 }
 
@@ -212,15 +338,7 @@ pub fn diff_sig(sig_source: String, dest: String) -> Result<()> {
 
   for action in diff_res.iter() {
     match action.0 {
-      ChangeTag::Delete => {
-        let first = &action.1[0];
-        let last = &action.1[action.1.len() - 1];
-        println!(
-          "- {} -> {}",
-          first.offset,
-          last.offset + (last.length as u64)
-        );
-      }
+      ChangeTag::Delete => {}
       ChangeTag::Insert => {
         let mut size: usize = 0;
         action.1.into_iter().for_each(|ch| size += ch.length);

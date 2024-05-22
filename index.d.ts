@@ -7,5 +7,19 @@
 export function signatureToFile(source: string, dest: string): void
 /** Calculate the signature and return it as a Buffer. */
 export function signature(source: string): Buffer
-export function diff(source: string, dest: string): void
+/**
+ * Generate simple diff format:
+ *
+ * VERSION(u8) - a diff file version for compatibility checking
+ * OPERATION(u8) - 0/1, 0 means equal, 1 means insert
+ * DATA:
+ *   for 0:
+ *     START OFFSET(u64) - offset of the file A to copy from
+ *     END OFFSET(u64) - offset of the file A to copy until
+ *   for 1:
+ *     SIZE(usize) - the number of bytes
+ *     BYTES([u8]) - the raw binary data from file B to be insterted
+ */
+export function diff(a: string, b: string, diffPath: string): void
+export function apply(diffPath: string, a: string, result: string): void
 export function diffSig(sigSource: string, dest: string): void
