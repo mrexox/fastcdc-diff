@@ -1,6 +1,8 @@
 use crate::diff::Op;
 use crate::signature::VERSION;
 
+use reqwest::blocking::Client;
+use reqwest::header::{HeaderMap, HeaderValue, RANGE};
 use std::error::Error;
 use std::fmt;
 use std::io::{copy, ErrorKind, Read, Seek, SeekFrom, Write};
@@ -60,6 +62,52 @@ where
         diff.read_exact(&mut u64buf)?;
         let size = u64::from_be_bytes(u64buf);
         let mut chunk = diff.take(size as u64);
+        copy(&mut chunk, dest)?;
+      }
+    }
+  }
+
+  Ok(())
+}
+
+/// Downloads missing diff chunks, stores them in a temporary file and uses them along with `source`
+/// to construct the new file.
+pub(crate) fn apply_from_http<R, W>(
+  diff: Vec<(Op, u64, u64)>,
+  uri: String,
+  source: &mut R,
+  dest: &mut W,
+) -> Result<(), Box<dyn Error>>
+where
+  R: Read + Seek,
+  W: Write,
+{
+  let client = Client::new();
+  let mut diff_data = tempfile::tempfile()?;
+
+  for d in diff.iter() {
+    if let Op::Insert = d.0 {
+      let mut headers = HeaderMap::new();
+      headers.insert(
+        RANGE,
+        HeaderValue::from_str(format!("bytes={}-{}", d.1, d.1 + d.2).as_ref())?,
+      );
+      let mut response = client.get(&uri).headers(headers).send()?;
+      let _ = response.copy_to(&mut diff_data);
+    }
+  }
+
+  diff_data.seek(SeekFrom::Start(0))?;
+
+  for d in diff.iter() {
+    match d.0 {
+      Op::Equal => {
+        source.seek(SeekFrom::Start(d.1))?;
+        let mut chunk = source.take(d.2);
+        copy(&mut chunk, dest)?;
+      }
+      Op::Insert => {
+        let mut chunk = (&mut diff_data).take(d.2);
         copy(&mut chunk, dest)?;
       }
     }

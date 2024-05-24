@@ -3,7 +3,7 @@ import os from 'node:os'
 import path from 'node:path'
 import test from 'ava'
 
-import { diff, apply, signatureDiff, writeBinarySignature } from '../index.js'
+import { diff, apply, diffUsingSourceSignature, writeBinarySignature } from '../index.js'
 
 test('correctly applies generated diff', (t) => {
   const diffPath = path.join(os.tmpdir(), 'a-b.diff')
@@ -26,7 +26,7 @@ test('calculates the same diff with file and signature', (t) => {
   const sigPath = path.join(os.tmpdir(), 'a.sig')
   writeBinarySignature('__test__/A.bin', sigPath)
   diff('__test__/A.bin', '__test__/B.bin', diffPath)
-  signatureDiff(sigPath, '__test__/B.bin', sigDiffPath)
+  diffUsingSourceSignature(sigPath, '__test__/B.bin', sigDiffPath)
 
   t.is(Buffer.compare(fs.readFileSync(diffPath), fs.readFileSync(sigDiffPath)), 0)
 })

@@ -4,11 +4,11 @@ mod apply;
 mod diff;
 mod signature;
 
+use anyhow::Context;
 use napi::bindgen_prelude::*;
 use std::default::Default;
 use std::fs::{self, File};
 use std::io::Write;
-use std::path::Path;
 
 use crate::signature::Signature;
 use cloud_zsync::builder::{build_local_diff_file, build_local_file};
@@ -41,13 +41,8 @@ pub fn write_binary_signature(
   dest: String,
   options: Option<SignatureOptions>,
 ) -> Result<()> {
-  if !Path::new(&source).exists() {
-    return Err(Error::from_reason(format!("file {source} does not exist")));
-  }
-
-  let mut source = File::open(source).unwrap();
-  let mut dest = File::create(dest).unwrap();
-
+  let mut source = open_file(&source)?;
+  let mut dest = create_file(&dest)?;
   let options = options.unwrap_or(SignatureOptions::default());
 
   let signature = Signature::calculate(
@@ -56,8 +51,11 @@ pub fn write_binary_signature(
     options.avg_size,
     options.max_size,
   )
-  .unwrap();
-  signature.write(&mut dest).unwrap();
+  .map_err(to_js_error)?;
+  signature
+    .write(&mut dest)
+    .context("Failed to write the signature to the file")
+    .map_err(anyhow_to_js_error)?;
 
   Ok(())
 }
@@ -68,12 +66,8 @@ pub fn write_cloud_signature(
   dest: String,
   options: Option<SignatureOptions>,
 ) -> Result<()> {
-  if !Path::new(&source).exists() {
-    return Err(Error::from_reason(format!("file {source} does not exist")));
-  }
-
-  let mut source = File::open(source).unwrap();
-  let mut dest = File::create(dest).unwrap();
+  let mut source = open_file(&source)?;
+  let mut dest = create_file(&dest)?;
 
   let options = options.unwrap_or(SignatureOptions::default());
 
@@ -83,10 +77,15 @@ pub fn write_cloud_signature(
     options.avg_size,
     options.max_size,
   )
-  .unwrap();
+  .map_err(box_to_js_error)?;
 
-  let serialized = serde_json::to_string_pretty(&signature).unwrap();
-  dest.write_all(serialized.as_bytes()).unwrap();
+  let serialized = serde_json::to_string_pretty(&signature)
+    .context("Failed to serialize the signature")
+    .map_err(anyhow_to_js_error)?;
+  dest
+    .write_all(serialized.as_bytes())
+    .context("Failed to write the serialized signature to the file")
+    .map_err(anyhow_to_js_error)?;
 
   Ok(())
 }
@@ -94,85 +93,129 @@ pub fn write_cloud_signature(
 /// Returns calculated signature of the `source`.
 #[napi]
 pub fn signature(source: String, options: Option<SignatureOptions>) -> Result<Buffer> {
-  if !Path::new(&source).exists() {
-    return Err(Error::from_reason(format!("file {source} does not exist")));
-  }
-
   let options = options.unwrap_or(SignatureOptions::default());
 
-  let mut source = File::open(source).unwrap();
+  let mut source = open_file(&source)?;
   let signature = Signature::calculate(
     &mut source,
     options.min_size,
     options.avg_size,
     options.max_size,
   )
-  .unwrap();
+  .map_err(to_js_error)?;
 
   let mut dest = Vec::new();
-  signature.write(&mut dest).unwrap();
+  signature.write(&mut dest).map_err(to_js_error)?;
 
   Ok(dest.into())
 }
 
-/// Writes a diff that transforms `a` -> `b` into `dest`.
+/// Generates a diff that transforms `source` to `target`.
 #[napi]
-pub fn diff(a: String, b: String, dest: String, options: Option<SignatureOptions>) -> Result<()> {
+pub fn diff(
+  source: String,
+  target: String,
+  dest: String,
+  options: Option<SignatureOptions>,
+) -> Result<()> {
   let options = options.unwrap_or(SignatureOptions::default());
 
-  let mut a_file = File::open(a).unwrap();
-  let a_sig = Signature::calculate(
-    &mut a_file,
+  let mut source_file = open_file(&source)?;
+  let source_signature = Signature::calculate(
+    &mut source_file,
     options.min_size,
     options.avg_size,
     options.max_size,
   )
-  .unwrap();
+  .map_err(to_js_error)?;
 
-  let mut b_file = File::open(b).unwrap();
-  let b_sig = Signature::calculate(
-    &mut b_file,
-    options.min_size,
-    options.avg_size,
-    options.max_size,
-  )
-  .unwrap();
-
-  let mut dest_file = File::create(dest).unwrap();
-
-  diff::write_diff_between(&a_sig, &b_sig, &mut b_file, &mut dest_file).unwrap();
-
-  Ok(())
-}
-
-/// Calculates diff based on source file signature and the target file.
-#[napi]
-pub fn signature_diff(sig: String, target: String, dest: String) -> Result<()> {
-  let sig_data = fs::read(sig).unwrap();
-  let signature = Signature::load(&sig_data);
-
-  let mut target_file = File::open(target).unwrap();
+  let mut target_file = open_file(&target)?;
   let target_signature = Signature::calculate(
     &mut target_file,
-    signature.min_size,
-    signature.avg_size,
-    signature.max_size,
+    options.min_size,
+    options.avg_size,
+    options.max_size,
   )
-  .unwrap();
+  .map_err(to_js_error)?;
 
-  let mut dest_file = File::create(dest).unwrap();
+  let mut dest_file = create_file(&dest)?;
 
   diff::write_diff_between(
-    &signature,
+    &source_signature,
     &target_signature,
     &mut target_file,
     &mut dest_file,
   )
-  .unwrap();
+  .map_err(box_to_js_error)?;
 
   Ok(())
 }
 
+/// Generates a diff that transforms `source` to `target. Only source signature is required.
+#[napi]
+pub fn diff_using_source_signature(source_sig: String, target: String, dest: String) -> Result<()> {
+  let sig_data = fs::read(source_sig).map_err(to_js_error)?;
+  let source_signature = Signature::load(&sig_data);
+
+  let mut target_file = open_file(&target)?;
+  let target_signature = Signature::calculate(
+    &mut target_file,
+    source_signature.min_size,
+    source_signature.avg_size,
+    source_signature.max_size,
+  )
+  .map_err(to_js_error)?;
+
+  let mut dest_file = create_file(&dest)?;
+
+  diff::write_diff_between(
+    &source_signature,
+    &target_signature,
+    &mut target_file,
+    &mut dest_file,
+  )
+  .map_err(box_to_js_error)?;
+
+  Ok(())
+}
+
+/// Downloads the required parts of the file and builds a new file based on `target_sig` and the
+/// `source`.
+#[napi]
+pub fn pull_using_remote_signature(
+  source: String,
+  target_sig: String,
+  file_uri: String,
+  dest: String,
+) -> Result<()> {
+  let sig_data = fs::read(target_sig).map_err(to_js_error)?;
+  let target_signature = Signature::load(&sig_data);
+
+  let mut source_file = open_file(&source)?;
+  let source_signature = Signature::calculate(
+    &mut source_file,
+    target_signature.min_size,
+    target_signature.avg_size,
+    target_signature.max_size,
+  )
+  .map_err(to_js_error)?;
+
+  let sig_diff = diff::diff_signatures(&source_signature, &target_signature);
+
+  let mut dest_file = create_file(&dest)?;
+  apply::apply_from_http(sig_diff, file_uri, &mut source_file, &mut dest_file)
+    .map_err(box_to_js_error)?;
+
+  // let mut diff_data = create_file("/tmp/file-data.bin")?;
+  // let client = Client::new();
+  // let mut headers = HeaderMap::new();
+  // headers.insert(RANGE, HeaderValue::from_str("bytes=1-100500")?);
+  // let response = client.get(file_uri).headers().send()?;
+
+  // response.copy_to(&mut diff_data);
+
+  Ok(())
+}
 // TODO: Implement with fetching data from the Cloud
 // #[napi]
 // pub fn cloud_signature_diff(sig: String, target: String, dest: String) -> Result<()> {
@@ -206,12 +249,35 @@ pub fn signature_diff(sig: String, target: String, dest: String) -> Result<()> {
 /// Applies `diff` to the `a` and writes the result to `result`.
 #[napi]
 pub fn apply(diff: String, a: String, result: String) -> Result<()> {
-  let mut diff_file = File::open(diff).unwrap();
+  let mut diff_file = open_file(&diff)?;
+  let mut target_file = open_file(&a)?;
+  let mut res_file = File::create(result).map_err(to_js_error)?;
 
-  let mut target_file = File::open(a).unwrap();
-  let mut res_file = File::create(result).unwrap();
-
-  apply::apply(&mut diff_file, &mut target_file, &mut res_file).unwrap();
+  apply::apply(&mut diff_file, &mut target_file, &mut res_file).map_err(box_to_js_error)?;
 
   Ok(())
+}
+
+fn open_file(path: &str) -> Result<File> {
+  File::open(path)
+    .with_context(|| format!("Failed to open a file {}", path))
+    .map_err(anyhow_to_js_error)
+}
+
+fn create_file(path: &str) -> Result<File> {
+  File::create(path)
+    .with_context(|| format!("Failed to create a file {}", path))
+    .map_err(anyhow_to_js_error)
+}
+
+fn to_js_error(e: impl std::error::Error) -> Error {
+  Error::from_reason(e.to_string())
+}
+
+fn anyhow_to_js_error(e: anyhow::Error) -> Error {
+  Error::from_reason(e.to_string())
+}
+
+fn box_to_js_error(e: Box<dyn std::error::Error>) -> Error {
+  Error::from_reason(e.to_string())
 }

@@ -13,9 +13,14 @@ export function writeBinarySignature(source: string, dest: string, options?: Sig
 export function writeCloudSignature(source: string, dest: string, options?: SignatureOptions | undefined | null): void
 /** Returns calculated signature of the `source`. */
 export function signature(source: string, options?: SignatureOptions | undefined | null): Buffer
-/** Writes a diff that transforms `a` -> `b` into `dest`. */
-export function diff(a: string, b: string, dest: string, options?: SignatureOptions | undefined | null): void
-/** Calculates diff based on source file signature and the target file. */
-export function signatureDiff(sig: string, target: string, dest: string): void
-/** Applies `diff_path` to the `a` and writes the result to `result`. */
-export function apply(diffPath: string, a: string, result: string): void
+/** Generates a diff that transforms `source` to `target`. */
+export function diff(source: string, target: string, dest: string, options?: SignatureOptions | undefined | null): void
+/** Generates a diff that transforms `source` to `target. Only source signature is required. */
+export function diffUsingSourceSignature(sourceSig: string, target: string, dest: string): void
+/**
+ * Downloads the required parts of the file and builds a new file based on `target_sig` and the
+ * `source`.
+ */
+export function pullUsingRemoteSignature(source: string, targetSig: string, fileUri: string, dest: string): void
+/** Applies `diff` to the `a` and writes the result to `result`. */
+export function apply(diff: string, a: string, result: string): void
