@@ -9,13 +9,13 @@ crate-type = ["cdylib"]
 [dependencies]
 arrayref = "0.3.7"
 blake3 = "1.5.1"
-fast_rsync = "0.2.0"
 fastcdc = { version = "3.1.0" }
 # Default enable napi4 feature, see https://nodejs.org/api/n-api.html#node-api-version-matrix
 napi = { version = "2.12.2", default-features = false, features = ["napi4"] }
 napi-derive = "2.12.2"
 rand = "0.8.5"
-similar = "2.5.0"
+cloud-zsync = { git = "https://github.com/gzigzigzeo/cloud-rsync.git" }
+serde_json = "1.0.117"
 
 [build-dependencies]
 napi-build = "2.0.1"

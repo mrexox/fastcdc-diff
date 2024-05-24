@@ -1,17 +1,17 @@
 use crate::signature::{Chunk, Signature};
 
-use similar::utils::diff_slices;
-use similar::{Algorithm, ChangeTag};
+use std::collections::HashMap;
 use std::error::Error;
 use std::io::{self, copy, Read, Seek, SeekFrom, Write};
 
+#[derive(Debug)]
 pub(crate) enum Op {
   Equal,
   Insert,
 }
 
 impl Op {
-  fn to_u8(self) -> u8 {
+  fn to_u8(&self) -> u8 {
     match self {
       Op::Equal => 0,
       Op::Insert => 1,
@@ -54,35 +54,81 @@ where
   // Write the operations
   for op in diff_signatures(a, b).iter() {
     match op.0 {
-      ChangeTag::Equal => {
-        let start = &op.1[0];
-        let end = &op.1[op.1.len() - 1];
-
-        serialize_equal(start, end, dest)?;
+      Op::Equal => {
+        serialize_equal(op.1, op.2, dest)?;
       }
-      ChangeTag::Insert => {
-        let start = &op.1[0];
-        let end = &op.1[op.1.len() - 1];
-
-        serialize_insert(start, end, b_data, dest)?;
+      Op::Insert => {
+        serialize_insert(op.1, op.2, b_data, dest)?;
       }
-      ChangeTag::Delete => {}
     }
   }
 
   Ok(())
 }
 
-pub(crate) fn diff_signatures<'a>(
-  a: &'a Signature,
-  b: &'a Signature,
-) -> Vec<(ChangeTag, &'a [Chunk])> {
-  diff_slices(Algorithm::Myers, &a.chunks, &b.chunks)
+/// Returns a vector with tuples: (Op, offset, size).
+/// For `Op::Insert` offset and size refer to the target file.
+/// For `Op::Equal` offset and size refer to the source file.
+pub(crate) fn diff_signatures<'a>(a: &'a Signature, b: &'a Signature) -> Vec<(Op, u64, u64)> {
+  let mut original_chunks: HashMap<blake3::Hash, &Chunk> = HashMap::with_capacity(a.chunks.len());
+  for chunk in a.chunks.iter() {
+    original_chunks.entry(chunk.hash).or_insert(&chunk);
+  }
+
+  let mut diff: Vec<(Op, u64, u64)> = Vec::new();
+  let mut current_op: Op = Op::Equal;
+  let mut current_length = 0;
+  let mut current_offset = 0;
+  for new_chunk in b.chunks.iter() {
+    match original_chunks.get(&new_chunk.hash) {
+      Some(&chunk) => match current_op {
+        Op::Equal => {
+          if current_offset + current_length == chunk.offset {
+            current_length += chunk.length as u64;
+          } else {
+            diff.push((Op::Equal, current_offset, current_length));
+            current_offset = chunk.offset;
+            current_length = chunk.length as u64;
+          }
+        }
+        Op::Insert => {
+          if current_length > 0 {
+            diff.push((Op::Insert, current_offset, current_length));
+            current_offset = chunk.offset;
+          }
+          current_length = chunk.length as u64;
+          current_op = Op::Equal;
+        }
+      },
+      None => match current_op {
+        Op::Insert => {
+          if current_offset + current_length == new_chunk.offset {
+            current_length += new_chunk.length as u64;
+          } else {
+            diff.push((Op::Insert, current_offset, current_length));
+            current_offset = new_chunk.offset;
+            current_length = new_chunk.length as u64;
+          }
+        }
+        Op::Equal => {
+          if current_length > 0 {
+            diff.push((Op::Equal, current_offset, current_length));
+            current_offset = new_chunk.offset;
+          }
+          current_length = new_chunk.length as u64;
+          current_op = Op::Insert;
+        }
+      },
+    }
+  }
+  diff.push((current_op, current_offset, current_length));
+
+  diff
 }
 
 pub(crate) fn serialize_insert<R, W>(
-  start: &Chunk,
-  end: &Chunk,
+  offset: u64,
+  size: u64,
   source: &mut R,
   dest: &mut W,
 ) -> Result<(), io::Error>
@@ -91,11 +137,9 @@ where
   W: Write,
 {
   dest.write_all(&[Op::Insert.to_u8()])?;
-
-  let size = end.offset + end.length as u64 - start.offset;
   dest.write_all(size.to_be_bytes().as_ref())?;
 
-  source.seek(SeekFrom::Start(start.offset))?;
+  source.seek(SeekFrom::Start(offset))?;
   let mut chunk = source.take(size);
   copy(&mut chunk, dest)?;
 
@@ -103,13 +147,13 @@ where
 }
 
 pub(crate) fn serialize_equal<W: Write>(
-  start: &Chunk,
-  end: &Chunk,
+  offset: u64,
+  size: u64,
   dest: &mut W,
 ) -> Result<(), Box<dyn Error>> {
   dest.write_all(&[Op::Equal.to_u8()])?;
-  dest.write_all(start.offset.to_be_bytes().as_ref())?;
-  dest.write_all((end.offset + end.length as u64).to_be_bytes().as_ref())?;
+  dest.write_all(offset.to_be_bytes().as_ref())?;
+  dest.write_all(size.to_be_bytes().as_ref())?;
 
   Ok(())
 }

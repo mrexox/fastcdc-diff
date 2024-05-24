@@ -48,17 +48,17 @@ where
     match Op::from_u8(buf[0]) {
       Op::Equal => {
         diff.read_exact(&mut u64buf)?;
-        let start = u64::from_be_bytes(u64buf);
+        let offset = u64::from_be_bytes(u64buf);
         diff.read_exact(&mut u64buf)?;
-        let end = u64::from_be_bytes(u64buf);
+        let size = u64::from_be_bytes(u64buf);
 
-        target.seek(SeekFrom::Start(start))?;
-        let mut chunk = target.take(end - start);
+        target.seek(SeekFrom::Start(offset))?;
+        let mut chunk = target.take(size);
         copy(&mut chunk, dest)?;
       }
       Op::Insert => {
         diff.read_exact(&mut u64buf)?;
-        let size = usize::from_be_bytes(u64buf);
+        let size = u64::from_be_bytes(u64buf);
         let mut chunk = diff.take(size as u64);
         copy(&mut chunk, dest)?;
       }

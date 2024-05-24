@@ -10,12 +10,15 @@ pub const DEFAULT_MAX_SIZE: u32 = 65535;
 #[derive(Debug, Eq, PartialEq)]
 pub struct Signature {
   pub version: u8,
+  pub min_size: u32,
+  pub avg_size: u32,
+  pub max_size: u32,
   pub chunks: Vec<Chunk>,
 }
 
-#[derive(Debug, Hash, Clone, Eq, Ord)]
+#[derive(Debug, Hash, Clone)]
 pub struct Chunk {
-  pub hash: [u8; 32],
+  pub hash: blake3::Hash,
   pub offset: u64,
   pub length: usize,
 }
@@ -25,6 +28,8 @@ impl PartialEq for Chunk {
     self.hash == other.hash && self.length == other.length
   }
 }
+
+impl Eq for Chunk {}
 
 impl PartialOrd for Chunk {
   fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
@@ -49,7 +54,7 @@ impl Signature {
       let hash = blake3::hash(&chunk.data);
 
       chunks.push(Chunk {
-        hash: hash.into(),
+        hash,
         offset: chunk.offset,
         length: chunk.length,
       });
@@ -57,20 +62,25 @@ impl Signature {
 
     Ok(Self {
       version: VERSION,
+      min_size,
+      avg_size,
+      max_size,
       chunks,
     })
   }
 
   /// Loads signature from raw data.
-  #[allow(dead_code)]
   pub fn load(vec: &[u8]) -> Self {
     let version = vec[0];
-    let numchunks = usize::from_be_bytes(*array_ref![vec, 1, 8]);
-    let mut offset = 9;
+    let min_size = u32::from_be_bytes(*array_ref![vec, 1, 4]);
+    let avg_size = u32::from_be_bytes(*array_ref![vec, 5, 4]);
+    let max_size = u32::from_be_bytes(*array_ref![vec, 9, 4]);
+    let numchunks = usize::from_be_bytes(*array_ref![vec, 13, 8]);
+    let mut offset = 21;
     let mut chunks = Vec::with_capacity(numchunks);
     for _i in 0..numchunks {
       chunks.push(Chunk {
-        hash: array_ref![vec, offset, 32].clone(),
+        hash: array_ref![vec, offset, 32].clone().into(),
         offset: u64::from_be_bytes(*array_ref![vec, offset + 32, 8]),
         length: usize::from_be_bytes(*array_ref![vec, offset + 40, 8]),
       });
@@ -78,15 +88,24 @@ impl Signature {
       offset += 48;
     }
 
-    Self { version, chunks }
+    Self {
+      version,
+      min_size,
+      avg_size,
+      max_size,
+      chunks,
+    }
   }
 
   pub fn write<W: Write>(&self, dest: &mut W) -> Result<(), io::Error> {
     dest.write_all(&[self.version])?;
+    dest.write_all(self.min_size.to_be_bytes().as_ref())?;
+    dest.write_all(self.avg_size.to_be_bytes().as_ref())?;
+    dest.write_all(self.max_size.to_be_bytes().as_ref())?;
     dest.write_all(self.chunks.len().to_be_bytes().as_ref())?;
 
     for chunk in self.chunks.iter() {
-      dest.write_all(chunk.hash.as_ref())?;
+      dest.write_all(chunk.hash.as_bytes().as_ref())?;
       dest.write_all(chunk.offset.to_be_bytes().as_ref())?;
       dest.write_all(chunk.length.to_be_bytes().as_ref())?;
     }

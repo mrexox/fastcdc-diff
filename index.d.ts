@@ -9,10 +9,13 @@ export interface SignatureOptions {
   maxSize: number
 }
 /** Writes calculated signature for `source` to the `dest`. */
-export function signatureToFile(source: string, dest: string, options?: SignatureOptions | undefined | null): void
+export function writeBinarySignature(source: string, dest: string, options?: SignatureOptions | undefined | null): void
+export function writeCloudSignature(source: string, dest: string, options?: SignatureOptions | undefined | null): void
 /** Returns calculated signature of the `source`. */
 export function signature(source: string, options?: SignatureOptions | undefined | null): Buffer
 /** Writes a diff that transforms `a` -> `b` into `dest`. */
 export function diff(a: string, b: string, dest: string, options?: SignatureOptions | undefined | null): void
+/** Calculates diff based on source file signature and the target file. */
+export function signatureDiff(sig: string, target: string, dest: string): void
 /** Applies `diff_path` to the `a` and writes the result to `result`. */
 export function apply(diffPath: string, a: string, result: string): void
