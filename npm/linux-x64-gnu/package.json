@@ -1,6 +1,10 @@
 {
   "name": "fastcdc-diff-linux-x64-gnu",
   "version": "0.0.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/mrexox/fastcdc-diff"
+  },
   "os": [
     "linux"
   ],

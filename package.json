@@ -1,8 +1,12 @@
 {
   "name": "fastcdc-diff",
-  "version": "0.0.0",
+  "version": "0.0.1",
   "main": "index.js",
   "types": "index.d.ts",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/mrexox/fastcdc-diff"
+  },
   "napi": {
     "name": "fastcdc-diff",
     "triples": {

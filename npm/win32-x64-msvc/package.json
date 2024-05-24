@@ -1,6 +1,10 @@
 {
   "name": "fastcdc-diff-win32-x64-msvc",
   "version": "0.0.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/mrexox/fastcdc-diff"
+  },
   "os": [
     "win32"
   ],
