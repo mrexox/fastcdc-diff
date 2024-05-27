@@ -1,0 +1,4 @@
+pre-commit:
+  skip: rebase
+  clippy:
+    run: cargo clippy

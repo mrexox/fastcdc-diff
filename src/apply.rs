@@ -61,7 +61,7 @@ where
       Operation::Insert => {
         diff.read_exact(&mut u64buf)?;
         let size = u64::from_be_bytes(u64buf);
-        let mut chunk = diff.take(size as u64);
+        let mut chunk = diff.take(size);
         copy(&mut chunk, dest)?;
       }
     }

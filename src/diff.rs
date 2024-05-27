@@ -78,7 +78,7 @@ pub(crate) fn diff_signatures<'a>(
 ) -> Vec<(Operation, u64, u64)> {
   let mut original_chunks: HashMap<blake3::Hash, &Chunk> = HashMap::with_capacity(a.chunks.len());
   for chunk in a.chunks.iter() {
-    original_chunks.entry(chunk.hash).or_insert(&chunk);
+    original_chunks.entry(chunk.hash).or_insert(chunk);
   }
 
   let mut diff: Vec<(Operation, u64, u64)> = Vec::new();

@@ -8,11 +8,8 @@ use anyhow::Context;
 use napi::bindgen_prelude::*;
 use std::default::Default;
 use std::fs::{self, File};
-use std::io::Write;
 
 use crate::signature::Signature;
-use cloud_zsync::builder::{build_local_diff_file, build_local_file};
-use cloud_zsync::signature::{Diff as CloudDiff, Signature as CloudSignature};
 
 #[macro_use]
 extern crate napi_derive;
@@ -43,7 +40,7 @@ pub fn write_binary_signature(
 ) -> Result<()> {
   let mut source_file = open_file(&source)?;
   let mut dest = create_file(&dest)?;
-  let options = options.unwrap_or(SignatureOptions::default());
+  let options = options.unwrap_or_default();
 
   let signature = Signature::calculate(
     &mut source_file,
@@ -61,40 +58,10 @@ pub fn write_binary_signature(
   Ok(())
 }
 
-#[napi]
-pub fn write_cloud_signature(
-  source: String,
-  dest: String,
-  options: Option<SignatureOptions>,
-) -> Result<()> {
-  let mut source = open_file(&source)?;
-  let mut dest = create_file(&dest)?;
-
-  let options = options.unwrap_or(SignatureOptions::default());
-
-  let signature = CloudSignature::generate(
-    &mut source,
-    options.min_size,
-    options.avg_size,
-    options.max_size,
-  )
-  .map_err(box_to_js_error)?;
-
-  let serialized = serde_json::to_string_pretty(&signature)
-    .context("Failed to serialize the signature")
-    .map_err(anyhow_to_js_error)?;
-  dest
-    .write_all(serialized.as_bytes())
-    .context("Failed to write the serialized signature to the file")
-    .map_err(anyhow_to_js_error)?;
-
-  Ok(())
-}
-
 /// Returns calculated signature of the `source`.
 #[napi]
 pub fn signature(source: String, options: Option<SignatureOptions>) -> Result<Buffer> {
-  let options = options.unwrap_or(SignatureOptions::default());
+  let options = options.unwrap_or_default();
 
   let mut source_file = open_file(&source)?;
   let signature = Signature::calculate(
@@ -120,7 +87,7 @@ pub fn diff(
   dest: String,
   options: Option<SignatureOptions>,
 ) -> Result<()> {
-  let options = options.unwrap_or(SignatureOptions::default());
+  let options = options.unwrap_or_default();
 
   let mut source_file = open_file(&source)?;
   let source_signature = Signature::calculate(
@@ -214,35 +181,6 @@ pub fn pull_using_remote_signature(
 
   Ok(())
 }
-// TODO: Implement with fetching data from the Cloud
-// #[napi]
-// pub fn cloud_signature_diff(sig: String, target: String, dest: String) -> Result<()> {
-//   let sig_file = File::open(sig).unwrap();
-//   let signature: CloudSignature = serde_json::from_reader(sig_file).unwrap();
-
-//   let mut target_file = File::open(target).unwrap();
-//   let target_sig = CloudSignature::generate(
-//     &mut target_file,
-//     // TODO: this must be taken from the deserialized signature
-//     signature::DEFAULT_MIN_SIZE,
-//     signature::DEFAULT_AVG_SIZE,
-//     signature::DEFAULT_MAX_SIZE,
-//   )
-//   .unwrap();
-
-//   let diff = match CloudDiff::new(&signature, &target_sig) {
-//     Some(diff) => diff,
-//     None => return Err(Error::from_reason("files are equal")),
-//   };
-
-//   // let mut dest_file = File::create(dest).unwrap();
-//   // let diff_schema =
-//   //   build_local_diff_file(&mut target_file, &mut dest_file, diff.operations().iter());
-
-//   // // build_local_file();
-
-//   Ok(())
-// }
 
 /// Applies `diff` to the `a` and writes the result to `result`.
 #[napi]

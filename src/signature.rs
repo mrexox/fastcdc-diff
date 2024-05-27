@@ -16,7 +16,7 @@ pub struct Signature {
   pub chunks: Vec<Chunk>,
 }
 
-#[derive(Debug, Hash, Clone)]
+#[derive(Debug, Clone)]
 pub struct Chunk {
   pub hash: blake3::Hash,
   pub offset: u64,
@@ -81,7 +81,7 @@ impl Signature {
     let mut chunks = Vec::with_capacity(numchunks);
     for _i in 0..numchunks {
       chunks.push(Chunk {
-        hash: array_ref![vec, offset, 32].clone().into(),
+        hash: (*array_ref![vec, offset, 32]).into(),
         offset: u64::from_be_bytes(*array_ref![vec, offset + 32, 8]),
         length: usize::from_be_bytes(*array_ref![vec, offset + 40, 8]),
       });
