@@ -1,4 +1,4 @@
-use crate::diff::Op;
+use crate::diff::Operation;
 use crate::signature::VERSION;
 
 use reqwest::blocking::Client;
@@ -47,8 +47,8 @@ where
       return Err(Box::new(err));
     }
 
-    match Op::from_u8(buf[0]) {
-      Op::Equal => {
+    match Operation::from_u8(buf[0]) {
+      Operation::Copy => {
         diff.read_exact(&mut u64buf)?;
         let offset = u64::from_be_bytes(u64buf);
         diff.read_exact(&mut u64buf)?;
@@ -58,7 +58,7 @@ where
         let mut chunk = target.take(size);
         copy(&mut chunk, dest)?;
       }
-      Op::Insert => {
+      Operation::Insert => {
         diff.read_exact(&mut u64buf)?;
         let size = u64::from_be_bytes(u64buf);
         let mut chunk = diff.take(size as u64);
@@ -73,7 +73,7 @@ where
 /// Downloads missing diff chunks, stores them in a temporary file and uses them along with `source`
 /// to construct the new file.
 pub(crate) fn apply_from_http<R, W>(
-  diff: Vec<(Op, u64, u64)>,
+  diff: Vec<(Operation, u64, u64)>,
   uri: String,
   source: &mut R,
   dest: &mut W,
@@ -86,7 +86,7 @@ where
   let mut diff_data = tempfile::tempfile()?;
 
   for d in diff.iter() {
-    if let Op::Insert = d.0 {
+    if let Operation::Insert = d.0 {
       let mut headers = HeaderMap::new();
       headers.insert(
         RANGE,
@@ -101,12 +101,12 @@ where
 
   for d in diff.iter() {
     match d.0 {
-      Op::Equal => {
+      Operation::Copy => {
         source.seek(SeekFrom::Start(d.1))?;
         let mut chunk = source.take(d.2);
         copy(&mut chunk, dest)?;
       }
-      Op::Insert => {
+      Operation::Insert => {
         let mut chunk = (&mut diff_data).take(d.2);
         copy(&mut chunk, dest)?;
       }

@@ -41,17 +41,18 @@ pub fn write_binary_signature(
   dest: String,
   options: Option<SignatureOptions>,
 ) -> Result<()> {
-  let mut source = open_file(&source)?;
+  let mut source_file = open_file(&source)?;
   let mut dest = create_file(&dest)?;
   let options = options.unwrap_or(SignatureOptions::default());
 
   let signature = Signature::calculate(
-    &mut source,
+    &mut source_file,
     options.min_size,
     options.avg_size,
     options.max_size,
   )
-  .map_err(to_js_error)?;
+  .with_context(|| format!("Failed to calculate the sugnagure for {}", &source))
+  .map_err(anyhow_to_js_error)?;
   signature
     .write(&mut dest)
     .context("Failed to write the signature to the file")
@@ -95,14 +96,15 @@ pub fn write_cloud_signature(
 pub fn signature(source: String, options: Option<SignatureOptions>) -> Result<Buffer> {
   let options = options.unwrap_or(SignatureOptions::default());
 
-  let mut source = open_file(&source)?;
+  let mut source_file = open_file(&source)?;
   let signature = Signature::calculate(
-    &mut source,
+    &mut source_file,
     options.min_size,
     options.avg_size,
     options.max_size,
   )
-  .map_err(to_js_error)?;
+  .with_context(|| format!("Failed to calculate the sugnagure for {}", &source))
+  .map_err(anyhow_to_js_error)?;
 
   let mut dest = Vec::new();
   signature.write(&mut dest).map_err(to_js_error)?;
@@ -127,7 +129,8 @@ pub fn diff(
     options.avg_size,
     options.max_size,
   )
-  .map_err(to_js_error)?;
+  .with_context(|| format!("Failed to calculate the sugnagure for {}", &source))
+  .map_err(anyhow_to_js_error)?;
 
   let mut target_file = open_file(&target)?;
   let target_signature = Signature::calculate(
@@ -136,7 +139,8 @@ pub fn diff(
     options.avg_size,
     options.max_size,
   )
-  .map_err(to_js_error)?;
+  .with_context(|| format!("Failed to calculate the sugnagure for {}", &target))
+  .map_err(anyhow_to_js_error)?;
 
   let mut dest_file = create_file(&dest)?;
 
@@ -164,7 +168,8 @@ pub fn diff_using_source_signature(source_sig: String, target: String, dest: Str
     source_signature.avg_size,
     source_signature.max_size,
   )
-  .map_err(to_js_error)?;
+  .with_context(|| format!("Failed to calculate the sugnagure for {}", &target))
+  .map_err(anyhow_to_js_error)?;
 
   let mut dest_file = create_file(&dest)?;
 
@@ -198,21 +203,14 @@ pub fn pull_using_remote_signature(
     target_signature.avg_size,
     target_signature.max_size,
   )
-  .map_err(to_js_error)?;
+  .with_context(|| format!("Failed to calculate the sugnagure for {}", &source))
+  .map_err(anyhow_to_js_error)?;
 
   let sig_diff = diff::diff_signatures(&source_signature, &target_signature);
 
   let mut dest_file = create_file(&dest)?;
   apply::apply_from_http(sig_diff, file_uri, &mut source_file, &mut dest_file)
     .map_err(box_to_js_error)?;
-
-  // let mut diff_data = create_file("/tmp/file-data.bin")?;
-  // let client = Client::new();
-  // let mut headers = HeaderMap::new();
-  // headers.insert(RANGE, HeaderValue::from_str("bytes=1-100500")?);
-  // let response = client.get(file_uri).headers().send()?;
-
-  // response.copy_to(&mut diff_data);
 
   Ok(())
 }

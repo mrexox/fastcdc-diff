@@ -24,6 +24,7 @@ pub struct Chunk {
 }
 
 impl PartialEq for Chunk {
+  // Chunks are equal when they have similar data hashes. Blake3 strong hashing guarantees this.
   fn eq(&self, other: &Self) -> bool {
     self.hash == other.hash && self.length == other.length
   }
