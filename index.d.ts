@@ -10,7 +10,6 @@ export interface SignatureOptions {
 }
 /** Writes calculated signature for `source` to the `dest`. */
 export function writeBinarySignature(source: string, dest: string, options?: SignatureOptions | undefined | null): void
-export function writeCloudSignature(source: string, dest: string, options?: SignatureOptions | undefined | null): void
 /** Returns calculated signature of the `source`. */
 export function signature(source: string, options?: SignatureOptions | undefined | null): Buffer
 /** Generates a diff that transforms `source` to `target`. */

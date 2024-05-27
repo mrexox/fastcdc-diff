@@ -310,10 +310,9 @@ if (!nativeBinding) {
   throw new Error(`Failed to load native binding`)
 }
 
-const { writeBinarySignature, writeCloudSignature, signature, diff, diffUsingSourceSignature, pullUsingRemoteSignature, apply } = nativeBinding
+const { writeBinarySignature, signature, diff, diffUsingSourceSignature, pullUsingRemoteSignature, apply } = nativeBinding
 
 module.exports.writeBinarySignature = writeBinarySignature
-module.exports.writeCloudSignature = writeCloudSignature
 module.exports.signature = signature
 module.exports.diff = diff
 module.exports.diffUsingSourceSignature = diffUsingSourceSignature
