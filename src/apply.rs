@@ -23,7 +23,7 @@ impl Error for VersionMismatch {
   }
 }
 
-pub(crate) fn apply<R, W>(diff: &mut R, target: &mut R, dest: &mut W) -> Result<(), Box<dyn Error>>
+pub(crate) fn apply<R, W>(diff: &mut R, source: &mut R, dest: &mut W) -> Result<(), Box<dyn Error>>
 where
   R: Read + Seek,
   W: Write,
@@ -54,8 +54,8 @@ where
         diff.read_exact(&mut u64buf)?;
         let size = u64::from_be_bytes(u64buf);
 
-        target.seek(SeekFrom::Start(offset))?;
-        let mut chunk = target.take(size);
+        source.seek(SeekFrom::Start(offset))?;
+        let mut chunk = source.take(size);
         copy(&mut chunk, dest)?;
       }
       Operation::Insert => {
@@ -83,21 +83,24 @@ where
   W: Write,
 {
   let client = Client::new();
-  let mut diff_data = tempfile::tempfile()?;
+  let remote_data = &mut tempfile::tempfile()?;
 
   for d in diff.iter() {
-    if let Operation::Insert = d.0 {
-      let mut headers = HeaderMap::new();
-      headers.insert(
-        RANGE,
-        HeaderValue::from_str(format!("bytes={}-{}", d.1, d.1 + d.2).as_ref())?,
-      );
-      let mut response = client.get(&uri).headers(headers).send()?;
-      let _ = response.copy_to(&mut diff_data);
+    match d.0 {
+      Operation::Copy => {}
+      Operation::Insert => {
+        let mut headers = HeaderMap::new();
+        headers.insert(
+          RANGE,
+          HeaderValue::from_str(format!("bytes={}-{}", d.1, d.1 + d.2 - 1).as_ref())?,
+        );
+        let mut response = client.get(&uri).headers(headers).send()?;
+        let _ = response.copy_to(remote_data);
+      }
     }
   }
 
-  diff_data.seek(SeekFrom::Start(0))?;
+  remote_data.seek(SeekFrom::Start(0))?;
 
   for d in diff.iter() {
     match d.0 {
@@ -107,7 +110,7 @@ where
         copy(&mut chunk, dest)?;
       }
       Operation::Insert => {
-        let mut chunk = (&mut diff_data).take(d.2);
+        let mut chunk = remote_data.take(d.2);
         copy(&mut chunk, dest)?;
       }
     }

@@ -14,7 +14,6 @@ test('correctly applies generated diff', (t) => {
 
   const b = fs.readFileSync('__test__/B.bin')
   const bRes = fs.readFileSync(resultPath)
-  console.log(resultPath)
 
   t.is(Buffer.compare(b, bRes), 0)
 })
