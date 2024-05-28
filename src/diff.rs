@@ -7,7 +7,7 @@ use std::io::{self, copy, Read, Seek, SeekFrom, Write};
 /// Operation is an operation for applying the diff.
 /// `Operation::Insert` is for inserting new data that is not present in the source file.
 /// `Operation::Copy` is for copying existing data from the source file.
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub(crate) enum Operation {
   Copy,
   Insert,
@@ -92,7 +92,9 @@ pub(crate) fn diff_signatures<'a>(
           if current_offset + current_length == chunk.offset {
             current_length += chunk.length as u64;
           } else {
-            diff.push((Operation::Copy, current_offset, current_length));
+            if current_length > 0 {
+              diff.push((Operation::Copy, current_offset, current_length));
+            }
             current_offset = chunk.offset;
             current_length = chunk.length as u64;
           }
@@ -111,7 +113,9 @@ pub(crate) fn diff_signatures<'a>(
           if current_offset + current_length == new_chunk.offset {
             current_length += new_chunk.length as u64;
           } else {
-            diff.push((Operation::Insert, current_offset, current_length));
+            if current_length > 0 {
+              diff.push((Operation::Insert, current_offset, current_length));
+            }
             current_offset = new_chunk.offset;
             current_length = new_chunk.length as u64;
           }
@@ -162,4 +166,91 @@ pub(crate) fn serialize_copy<W: Write>(
   dest.write_all(size.to_be_bytes().as_ref())?;
 
   Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+  use super::Chunk;
+  use super::Operation;
+  use super::Signature;
+
+  #[test]
+  fn test_diff_signatures() {
+    let chunks1 = vec![
+      Chunk {
+        hash: [4u8; 32].into(),
+        offset: 0,
+        length: 16,
+      },
+      Chunk {
+        hash: [0u8; 32].into(),
+        offset: 16,
+        length: 256,
+      },
+      Chunk {
+        hash: [2u8; 32].into(),
+        offset: 272,
+        length: 18,
+      },
+    ];
+    let sig1 = Signature {
+      version: 0,
+      min_size: 1024,
+      avg_size: 1024,
+      max_size: 2048,
+      chunks: chunks1,
+    };
+
+    let chunks2 = vec![
+      Chunk {
+        hash: [0u8; 32].into(),
+        offset: 0,
+        length: 256,
+      },
+      Chunk {
+        hash: [4u8; 32].into(),
+        offset: 256,
+        length: 16,
+      },
+      Chunk {
+        hash: [5u8; 32].into(),
+        offset: 272,
+        length: 28,
+      },
+      Chunk {
+        hash: [6u8; 32].into(),
+        offset: 300,
+        length: 12,
+      },
+      Chunk {
+        hash: [2u8; 32].into(),
+        offset: 312,
+        length: 18,
+      },
+      Chunk {
+        hash: [17u8; 32].into(),
+        offset: 330,
+        length: 10,
+      },
+    ];
+    let sig2 = super::Signature {
+      version: 0,
+      min_size: 1024,
+      avg_size: 1024,
+      max_size: 2048,
+      chunks: chunks2,
+    };
+
+    let res = super::diff_signatures(&sig1, &sig2);
+    assert_eq!(
+      res,
+      vec![
+        (Operation::Copy, 16, 256),
+        (Operation::Copy, 0, 16),
+        (Operation::Insert, 272, 40),
+        (Operation::Copy, 272, 18),
+        (Operation::Insert, 330, 10),
+      ]
+    )
+  }
 }

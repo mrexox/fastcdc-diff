@@ -5,6 +5,7 @@ mod diff;
 mod signature;
 
 use anyhow::Context;
+use futures::prelude::*;
 use napi::bindgen_prelude::*;
 use std::default::Default;
 use std::fs::{self, File};
@@ -154,7 +155,7 @@ pub fn diff_using_source_signature(source_sig: String, target: String, dest: Str
 /// Downloads the required parts of the file and builds a new file based on `target_sig` and the
 /// `source`.
 #[napi]
-pub fn pull_using_remote_signature(
+pub async fn pull_using_remote_signature(
   source: String,
   target_sig: String,
   file_uri: String,
@@ -177,7 +178,8 @@ pub fn pull_using_remote_signature(
 
   let mut dest_file = create_file(&dest)?;
   apply::apply_from_http(sig_diff, file_uri, &mut source_file, &mut dest_file)
-    .map_err(box_to_js_error)?;
+    .map_err(box_to_js_error)
+    .await?;
 
   Ok(())
 }

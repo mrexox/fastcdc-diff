@@ -1,8 +1,8 @@
 use crate::diff::Operation;
 use crate::signature::VERSION;
 
-use reqwest::blocking::Client;
-use reqwest::header::{HeaderMap, HeaderValue, RANGE};
+use reqwest::header::RANGE;
+use reqwest::Client;
 use std::error::Error;
 use std::fmt;
 use std::io::{copy, ErrorKind, Read, Seek, SeekFrom, Write};
@@ -72,7 +72,7 @@ where
 
 /// Downloads missing diff chunks, stores them in a temporary file and uses them along with `source`
 /// to construct the new file.
-pub(crate) fn apply_from_http<R, W>(
+pub(crate) async fn apply_from_http<R, W>(
   diff: Vec<(Operation, u64, u64)>,
   uri: String,
   source: &mut R,
@@ -82,21 +82,35 @@ where
   R: Read + Seek,
   W: Write,
 {
-  let client = Client::new();
   let remote_data = &mut tempfile::tempfile()?;
+  let mut byte_ranges = Vec::new();
 
   for d in diff.iter() {
     match d.0 {
       Operation::Copy => {}
       Operation::Insert => {
-        let mut headers = HeaderMap::new();
-        headers.insert(
-          RANGE,
-          HeaderValue::from_str(format!("bytes={}-{}", d.1, d.1 + d.2 - 1).as_ref())?,
-        );
-        let mut response = client.get(&uri).headers(headers).send()?;
-        let _ = response.copy_to(remote_data);
+        byte_ranges.push((d.1, d.1 + d.2 - 1));
       }
+    }
+  }
+
+  let mut tasks = Vec::with_capacity(byte_ranges.len());
+  for (start, end) in byte_ranges {
+    let url = uri.clone();
+    let task = napi::tokio::task::spawn(async move {
+      Client::new()
+        .get(url)
+        .header(RANGE, format!("bytes={}-{}", start, end))
+        .send()
+        .await
+    });
+    tasks.push(task);
+  }
+
+  for task in tasks {
+    let mut response = task.await??;
+    while let Some(chunk) = response.chunk().await? {
+      remote_data.write_all(&chunk)?;
     }
   }
 

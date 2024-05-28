@@ -20,6 +20,6 @@ export function diffUsingSourceSignature(sourceSig: string, target: string, dest
  * Downloads the required parts of the file and builds a new file based on `target_sig` and the
  * `source`.
  */
-export function pullUsingRemoteSignature(source: string, targetSig: string, fileUri: string, dest: string): void
+export function pullUsingRemoteSignature(source: string, targetSig: string, fileUri: string, dest: string): Promise<void>
 /** Applies `diff` to the `a` and writes the result to `result`. */
 export function apply(diff: string, a: string, result: string): void

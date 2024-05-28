@@ -117,23 +117,31 @@ impl Signature {
   }
 }
 
-#[test]
-fn test_signature_serialization() {
-  use std::io::Cursor;
-  let data: Vec<u8> = (0..100500).map(|_| rand::random::<u8>()).collect();
-  let mut buffer = Cursor::new(&data[..]);
-  let sig = Signature::calculate(
-    &mut buffer,
-    DEFAULT_MIN_SIZE,
-    DEFAULT_AVG_SIZE,
-    DEFAULT_MAX_SIZE,
-  )
-  .unwrap();
-  let mut serialized_data = Vec::new();
-  sig
-    .write(&mut serialized_data)
-    .expect("can't serialize the signature");
+#[cfg(test)]
+mod test {
+  use super::Signature;
+  use super::DEFAULT_AVG_SIZE;
+  use super::DEFAULT_MAX_SIZE;
+  use super::DEFAULT_MIN_SIZE;
 
-  let sig_re = Signature::load(&serialized_data);
-  assert_eq!(sig, sig_re);
+  #[test]
+  fn test_signature_serialization() {
+    use std::io::Cursor;
+    let data: Vec<u8> = (0..100500).map(|_| rand::random::<u8>()).collect();
+    let mut buffer = Cursor::new(&data[..]);
+    let sig = Signature::calculate(
+      &mut buffer,
+      DEFAULT_MIN_SIZE,
+      DEFAULT_AVG_SIZE,
+      DEFAULT_MAX_SIZE,
+    )
+    .unwrap();
+    let mut serialized_data = Vec::new();
+    sig
+      .write(&mut serialized_data)
+      .expect("can't serialize the signature");
+
+    let sig_re = Signature::load(&serialized_data);
+    assert_eq!(sig, sig_re);
+  }
 }
