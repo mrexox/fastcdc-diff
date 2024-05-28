@@ -47,7 +47,7 @@ where
       return Err(Box::new(err));
     }
 
-    match Operation::from_u8(buf[0]) {
+    match buf[0].into() {
       Operation::Copy => {
         diff.read_exact(&mut u64buf)?;
         let offset = u64::from_be_bytes(u64buf);
@@ -116,15 +116,15 @@ where
 
   remote_data.seek(SeekFrom::Start(0))?;
 
-  for d in diff.iter() {
-    match d.0 {
+  for (op, offset, size) in diff {
+    match op {
       Operation::Copy => {
-        source.seek(SeekFrom::Start(d.1))?;
-        let mut chunk = source.take(d.2);
+        source.seek(SeekFrom::Start(offset))?;
+        let mut chunk = source.take(size);
         copy(&mut chunk, dest)?;
       }
       Operation::Insert => {
-        let mut chunk = remote_data.take(d.2);
+        let mut chunk = remote_data.take(size);
         copy(&mut chunk, dest)?;
       }
     }

@@ -13,19 +13,21 @@ pub(crate) enum Operation {
   Insert,
 }
 
-impl Operation {
-  fn to_u8(&self) -> u8 {
-    match self {
-      Operation::Copy => 0,
-      Operation::Insert => 1,
-    }
-  }
-
-  pub(crate) fn from_u8(operation: u8) -> Self {
-    match operation {
+impl From<u8> for Operation {
+  fn from(num: u8) -> Self {
+    match num {
       0 => Operation::Copy,
       1 => Operation::Insert,
       _ => unimplemented!(),
+    }
+  }
+}
+
+impl From<Operation> for u8 {
+  fn from(op: Operation) -> Self {
+    match op {
+      Operation::Copy => 0,
+      Operation::Insert => 1,
     }
   }
 }
@@ -55,13 +57,13 @@ where
   dest.write_all(&[a.version])?;
 
   // Write the operations
-  for op in diff_signatures(a, b).iter() {
-    match op.0 {
+  for (op, offset, size) in diff_signatures(a, b) {
+    match op {
       Operation::Copy => {
-        serialize_copy(op.1, op.2, dest)?;
+        serialize_copy(offset, size, dest)?;
       }
       Operation::Insert => {
-        serialize_insert(op.1, op.2, b_data, dest)?;
+        serialize_insert(offset, size, b_data, dest)?;
       }
     }
   }
@@ -146,7 +148,7 @@ where
   R: Read + Seek,
   W: Write,
 {
-  dest.write_all(&[Operation::Insert.to_u8()])?;
+  dest.write_all(&[Operation::Insert.into()])?;
   dest.write_all(size.to_be_bytes().as_ref())?;
 
   source.seek(SeekFrom::Start(offset))?;
@@ -161,7 +163,7 @@ pub(crate) fn serialize_copy<W: Write>(
   size: u64,
   dest: &mut W,
 ) -> Result<(), Box<dyn Error>> {
-  dest.write_all(&[Operation::Copy.to_u8()])?;
+  dest.write_all(&[Operation::Copy.into()])?;
   dest.write_all(offset.to_be_bytes().as_ref())?;
   dest.write_all(size.to_be_bytes().as_ref())?;
 
