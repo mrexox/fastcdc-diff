@@ -29,3 +29,6 @@ strip = "symbols"
 
 [target.x86_64-unknown-linux-gnu.dependencies]
 openssl-sys = { version = "0.9.102", features = ["vendored"] }
+
+[target.aarch64-unknown-linux-gnu.dependencies]
+openssl-sys = { version = "0.9.102", features = ["vendored"] }
